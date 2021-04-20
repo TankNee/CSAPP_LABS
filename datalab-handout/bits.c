@@ -165,8 +165,17 @@ int tmin(void)
  */
 int isTmax(int x)
 {
-    int maximum = ~(1 << 31);
-    return !(x ^ maximum);
+    // 因为我们要做的仅仅是找到一个数与最大值相同
+    // 并且返回值只能是0，1，那么就只能用!运算符，因此这道题的目标是将最大值转为0
+    // 最大值转为0有很多办法，比如可以x+x+1得到-1，-1再取反就可以得到0
+    // 但是-1的补码套入到这条公式也会有得到0，所以我们这里可以判断一下x+1的值是否为0
+    int xPlusOne = x + 1;
+    x += xPlusOne;
+    x = ~x;
+    // 如果x是-1.那么xPlusOne经过下面这条式子就会变成1，而其他的情况都是0，所以只有在-1的时候会多一个偏置值，让 x + xPlusOne不是0 。
+    xPlusOne = !xPlusOne;
+    x += xPlusOne;
+    return !x;
 }
 /* 
  * allOddBits - return 1 if all odd-numbered bits in word set to 1
@@ -178,7 +187,9 @@ int isTmax(int x)
  */
 int allOddBits(int x)
 {
-    int pattern = 0xAAAAAAAA;
+    int pattern = 0xAA;
+    pattern = (pattern << 8) + 0xAA;
+    pattern = pattern + (pattern << 16);
     x = x & pattern;
     return !(x ^ pattern);
 }
@@ -205,7 +216,18 @@ int negate(int x)
  */
 int isAsciiDigit(int x)
 {
-    return 2;
+    // 相当于把1移动到最高位上，即符号位是1，此时就是32位整数的最小值！
+    int sign = 0x1 << 31;
+    // 上限加上比x大的数字变成负数，即溢出，符号位从0变成1
+    int upperBound = ~(sign | 0x39);
+    // 下限加上比x小的数字变成负数(2F=0x30-1)
+    int lowerBound = ~0x2F;
+    // 当一个大于39的数字加上upper_bound时，结果的符号位将变成1，而sign是最小值，其除了符号位以外都是0，取&操作，相当于就是在判断最高位是否为1，然后将最高位移动到最低位。
+    // 如果结果为1，那么就超出了上限，否则肯定是0
+    upperBound = sign & (upperBound + x) >> 31;
+    // 如果输入的数字小于0x30，那么最后的结果就会让最高位为1，也就是没有发生溢出，如果结果是0，就说明发生了溢出，那么这个x就大于等于0x30!
+    lowerBound = sign & (lowerBound + x) >> 31;
+    return !(upperBound | lowerBound);
 }
 /* 
  * conditional - same as x ? y : z 
@@ -216,7 +238,11 @@ int isAsciiDigit(int x)
  */
 int conditional(int x, int y, int z)
 {
-    return 2;
+    int flag = !x;
+    flag = flag << 31;
+    // 利用算数右移的特性，右移的时候会把空缺的最高位用原本的符号位填充
+    flag = flag >> 31;
+    return (y & (~flag)) | (z & flag);
 }
 /* 
  * isLessOrEqual - if x <= y  then return 1, else return 0 
@@ -227,7 +253,19 @@ int conditional(int x, int y, int z)
  */
 int isLessOrEqual(int x, int y)
 {
-    return 2;
+    // 判断两个数的符号
+    int t_min = 1 << 31;
+    int xSign = ((x & t_min) >> 31) & 1;
+    int ySign = ((y & t_min) >> 31) & 1;
+    int isSignSame = !(xSign ^ ySign);
+    // 计算y-x的值的正负号
+    int negX = ~x + 1;
+    int subject = y + negX;
+    int subSign = (subject >> 31) & 1;
+    // 分为两种情况，符号相同的时候，只要y-x是正数，那么就是true
+    // 当符号不同的时候，只要y是正数，那么就是true
+    // 当我们把所有的运算数转为0，1的时候，位运算符也就相当于逻辑运算符！
+    return ((!isSignSame) & (!ySign)) | (isSignSame & !subSign);
 }
 //4
 /* 
@@ -240,7 +278,7 @@ int isLessOrEqual(int x, int y)
  */
 int logicalNeg(int x)
 {
-    return 2;
+    return ((x | (~x + 1)) >> 31) + 1;
 }
 /* howManyBits - return the minimum number of bits required to represent x in
  *             two's complement
@@ -256,7 +294,25 @@ int logicalNeg(int x)
  */
 int howManyBits(int x)
 {
-    return 0;
+    int b16, b8, b4, b2, b1, b0;
+    int sign = x >> 31;
+    x = (sign & ~x) | (~sign & x); //如果x为正则不变，否则按位取反（这样好找最高位为1的，原来是最高位为0的，这样也将符号位去掉了）
+    // 如果这个数的补码高16位上不全为0，那就说明这个数字至少要用16位来表示！
+    // 同理，如果这个数的高8位上不全为0，那么就说明这个数字至少8-15位是有效的，再加上上面的位数就行
+    // 有点像二分，先考虑高位的，如果高位存在就不用考虑低位，如果高位不存在，那就接着对低位进行二分
+    // 其中 x = x >> b16，一类的操作让高位存在的时候消除低位，高位不存在的时候不做变化，一行代码兼容了两种操作！
+    b16 = !!(x >> 16) << 4; //高十六位是否有1
+    x = x >> b16;           //如果有（至少需要16位），则将原数右移16位
+    b8 = !!(x >> 8) << 3;   //剩余位高8位是否有1
+    x = x >> b8;            //如果有（至少需要16+8=24位），则右移8位
+    b4 = !!(x >> 4) << 2;   //同理
+    x = x >> b4;
+    b2 = !!(x >> 2) << 1;
+    x = x >> b2;
+    b1 = !!(x >> 1);
+    x = x >> b1;
+    b0 = x;
+    return b16 + b8 + b4 + b2 + b1 + b0 + 1; //+1表示加上符号位
 }
 //float
 /* 
@@ -272,7 +328,22 @@ int howManyBits(int x)
  */
 unsigned floatScale2(unsigned uf)
 {
-    return 2;
+    int exponent = (uf & (0x7f800000)) >> 23;
+    int sign_flag = uf & (1 << 31);
+    int f = uf << 9;
+    if (exponent == 0)
+    {
+        return (uf << 1) | sign_flag;
+    }
+    if (exponent == 255)
+        return uf;
+    exponent++;
+    if (exponent == 255)
+    {
+        if (f == 0)
+            return uf | (0x7f800000);
+    }
+    return (exponent << 23) | (uf & 0x807fffff);
 }
 /* 
  * floatFloat2Int - Return bit-level equivalent of expression (int) f
@@ -288,7 +359,35 @@ unsigned floatScale2(unsigned uf)
  */
 int floatFloat2Int(unsigned uf)
 {
-    return 2;
+    // 取符号位
+    int s_ = uf >> 31;
+    // 取指数
+    int exp_ = ((uf & 0x7f800000) >> 23) - 127;
+    // 取尾数
+    int frac_ = (uf & 0x007fffff) | 0x00800000;
+    // 如果输入的无符号数是0，那么直接返回0，因为0的 bit-level equivalent of expression 也还是0
+    if (!(uf & 0x7fffffff))
+        return 0;
+    // 如果指数大于31那就说明超出了范围 out of range ，返回0x80000000
+    if (exp_ > 31)
+        return 0x80000000;
+    // 如果指数小于0，那么这个浮点数转为正数之后也是0
+    if (exp_ < 0)
+        return 0;
+    // 求出这个浮点数的整数部分的十进制形式
+    if (exp_ > 23)
+        frac_ <<= (exp_ - 23);
+    else
+        frac_ >>= (23 - exp_);
+    // 如果求出的十进制形式的数的符号位没有发生改变，那么就直接返回这个浮点数
+    if (!((frac_ >> 31) ^ s_))
+        return frac_;
+    // 如果发生改变并且最高位是0，就返回0x80000000
+    else if (frac_ >> 31)
+        return 0x80000000;
+    // 根据公式取反加一获得最终的答案
+    else
+        return ~frac_ + 1;
 }
 /* 
  * floatPower2 - Return bit-level equivalent of the expression 2.0^x
